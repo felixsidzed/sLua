@@ -1,7 +1,7 @@
 --!strict
 --!optimize 2
 
--- TODO: "inline" to lconstants.luau
+-- TODO: "inline" to lconf.luau
 
 local CASE_MULTIPLIER = 1 -- 0xE3
 
