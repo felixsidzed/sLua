@@ -2,6 +2,9 @@ local lstate = require("lstate.luau")
 local reader = require("reader.luau")
 local LUA = require("lconf.luau")
 local lapi = require("lapi.luau")
+local typeh = require("ltypeh")
+
+export type OpCodeDecoder = (op: number) -> (number)
 
 local LOP = {
     NOP = 0,
@@ -343,8 +346,254 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 	return 0
 end
 
-function luau_execute(L: lstate.lua_State)
-	error("TODO: luau_execute. i wish someone will finish ts for me 🥀")
+local function LUAU_INSN_OP(insn)
+	return bit32.band(insn, 0xFF)
+end
+local function LUAU_INSN_A(insn)
+	return bit32.band(bit32.rshift(insn, 8), 0xFF)
+end
+local function LUAU_INSN_B(insn)
+	return bit32.band(bit32.rshift(insn, 16), 0xFF)
+end
+local function LUAU_INSN_C(insn)
+	return bit32.band(bit32.rshift(insn, 24), 0xFF)
+end
+local function LUAU_INSN_D(insn)
+	return bit32.rshift(insn, 16)
+end
+local function LUAU_INSN_E(insn)
+return bit32.rshift(insn, 8)
+end
+
+function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
+	local pc = L.ci.savedpc
+	local ip = 0 -- no pointers so we have to use an instruction pointer (ip)
+
+	local cl = L.ci.func
+	local base = L.base
+	local k = cl.l.p.k
+
+	local function VM_REG(idx)
+		return base + idx
+	end
+
+	local function VM_KV(idx)
+		return k[idx + 1]
+	end
+
+	local function VM_PATCH_E(offset, slot)
+		--((uint32_t(slot) << 8) | (0x000000ffu & *(pc)))
+		pc[ip + (offset or 0)] = bit32.bor(bit32.lshift(slot, 8), bit32.band(0x000000ff, pc[ip]))
+	end
+
+	local VM_NEXT
+
+	local function VM_DISPATCH(): ()
+		local insn = pc[ip]
+		local op = LUAU_INSN_OP(insn)
+
+		if op == LOP.NOP then
+			return VM_NEXT()
+		
+		elseif op == LOP.PREPVARARGS then
+			local nparams = LUAU_INSN_A(insn)
+
+			local fixed = base
+			base = L.top
+
+			for i = 1, nparams do
+				lapi._setsvalue(L, base + i, L.stack[fixed + i])
+				lapi._setsvalue(L, fixed + i, LUA.NILOBJ)
+			end
+
+			L.ci.base = base
+			L.ci.top = base + cl.stacksize
+
+			L.base = base
+			L.top = L.ci.top
+
+			return VM_NEXT()
+
+		elseif op == LOP.GETGLOBAL then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			ip += 1
+			local aux = pc[ip]
+			local kv = VM_KV(aux)
+
+			-- uhhh too lazy to do wtv luau does
+			-- maybe ill implement this properly one day
+			lapi._setsvalue(L, ra, L.gt[kv])
+
+			return VM_NEXT()
+
+		elseif op == LOP.LOADK then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			local kv = VM_KV(LUAU_INSN_D(insn))
+
+			lapi._setsvalue(L, ra, kv)
+
+			return VM_NEXT()
+
+		elseif op == LOP.COVERAGE then
+			local hits = LUAU_INSN_E(insn)
+
+			hits = if hits < bit32.lshift(1, 23) - 1 then hits + 1 else hits
+			VM_PATCH_E(0, hits)
+
+			return VM_NEXT()
+
+		elseif op == LOP.CALL then
+			-- VM_INTERRUPT()
+			local ra = VM_REG(LUAU_INSN_A(insn) + 1)
+
+			local nparams = LUAU_INSN_B(insn) - 1
+			local nresults = LUAU_INSN_C(insn) - 1
+
+			local argtop = L.top
+			argtop = if nparams == LUA.MULTRET then argtop else ra + nparams
+
+			-- slow-path: not a function call
+			--if not typeh.luaT_isclosure(L.stack[ra]) then
+			--	L.ci.savedpc = pc
+
+			--	luaV_tryfuncTM(L, ra)
+			--	argtop += 1 -- __call adds an extra self
+			--end
+
+			local ccl = L.stack[ra]
+			L.ci.savedpc = pc
+
+			L.cip = L.ci
+			L.ci = {
+				func = L.stack[ra],
+				base = L.top - nparams,
+				top = L.top + ccl.stacksize,
+				savedpc = {},
+				flags = 0,
+				nresults = nresults
+			}
+			L.base = L.ci.base
+			L.top = argtop
+
+			if ccl.isC then
+				local func = ccl.c.f
+				local n = func(L)
+
+				-- yield
+				if n < 0 then
+					return -- goto exit
+				end
+
+				local res = ra --ci.func
+				local vali = L.top - n
+				local valend = L.top
+
+				local i = nresults
+				while i ~= 0 and vali < valend do
+					res += 1
+					vali += 1
+					lapi._setsvalue(L, res, L.stack[vali])
+					
+					i -= 1
+				end
+				while i > 0 do
+					lapi._setsvalue(L, res, nil)
+					res += 1
+					i -= 1
+				end
+
+				L.ci = L.cip
+				L.base = L.cip.base
+				L.top = if nresults == LUA.MULTRET then res else L.cip.top
+
+				base = L.base
+
+				return VM_NEXT()
+			else
+				local p = ccl.l.p
+
+				local argi = L.top
+				local argend = L.base + p.numparams
+				while argi < argend do
+					argi += 1
+					lapi._setsvalue(L, ra--[[argi]], nil)
+				end
+				L.top = if p.is_vararg then argi else L.ci.top
+
+				pc = p.code
+				cl = ccl
+				base = L.base
+				k = p.k
+
+				return VM_NEXT()
+			end
+
+		elseif op == LOP.RETURN then
+			-- VM_INTERRUPT()
+			local ra = VM_REG(LUAU_INSN_A(insn))--&base[LUAU_INSN_A(insn)]
+			local b = LUAU_INSN_B(insn) - 1
+
+			local ci = L.ci
+			local cip = L.cip
+
+			local res = ci.func
+
+			local vali = ra
+			local valend = if b == LUA.MULTRET then L.top else ra + b
+			local nresults = ci.nresults
+
+			local i = nresults
+			while i ~= 0 and vali < valend do
+				res += 1
+				vali += 1
+				lapi._setsvalue(L, res, L.stack[vali])
+				
+				i -= 1
+			end
+			while i > 0 do
+				lapi._setsvalue(L, res, nil)
+				res += 1
+				i -= 1
+			end
+
+			L.ci = cip
+			L.base = cip.base
+			L.top = if nresults == LUA.MULTRET then res else cip.top
+
+			if bit32.band(ci.flags, LUA.CALLINFO_RETURN) ~= 0 then
+				return -- goto exit
+			end
+
+			local nextcl = cip.func
+			local nextproto = nextcl.l.p
+
+			pc = cip.savedpc
+			cl = nextcl
+			base = L.base
+			k = nextproto.k
+
+			return VM_NEXT()
+
+		else
+			for k, v in LOP do
+				if v == op then 
+					print("unsupported opcode:", k)
+					return VM_NEXT()
+				end
+			end
+			print("unsupported opcode:", op)
+			return VM_NEXT()
+		end
+	end
+
+	VM_NEXT = function()
+		ip += 1
+		if ip > #pc then return end
+
+		VM_DISPATCH()
+	end
+
+	VM_NEXT() -- starts the interpreter "loop"
 end
 
 return {

@@ -1,9 +1,9 @@
 --!strict
 --!optimize 2
 
--- TODO: "inline" to lconstants.luau
+-- TODO: "inline" to lvm.luau
 
-local CASE_MULTIPLIER = 1 -- 0xE3
+local CASE_MULTIPLIER = 1 -- 277 for Roblox opcodes, should be added as a decodeOp
 
 local Luau: { [string]: any } = {
 	OpCode = {
