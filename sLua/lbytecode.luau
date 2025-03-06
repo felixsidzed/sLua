@@ -1,7 +1,7 @@
 --!strict
 --!optimize 2
 
--- TODO: "inline" to lvm.luau
+-- TODO: "inline" to lconf.luau
 
 local CASE_MULTIPLIER = 1 -- 277 for Roblox opcodes, should be added as a decodeOp
 

@@ -2,10 +2,10 @@ local sLua = require("../sLua.luau")
 
 -- include all the necessary libraries
 sLua.use("state")   -- luaL_newstate
-sLua.use("api")     -- ...
+sLua.use("api")     -- lua_watchstack, lua_newcclosure, lua_pushcfunction, lua_call, lua_unwatchstack
 sLua.use("typeh")   -- luaT_isclosure
 
--- create a new state and include the built-in library
+-- create a new state
 local L = sLua.luaL_newstate()
 
 -- montior values pushed onto the stack
