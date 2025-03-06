@@ -2,7 +2,7 @@ local lstate = require("lstate.luau")
 local reader = require("reader.luau")
 local LUA = require("lconf.luau")
 local lapi = require("lapi.luau")
-local typeh = require("ltypeh")
+--local typeh = require("ltypeh")
 
 export type OpCodeDecoder = (op: number) -> (number)
 
