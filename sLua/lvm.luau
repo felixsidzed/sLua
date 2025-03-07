@@ -7,9 +7,6 @@ local LUA = require("lconf.luau")
 local lapi = require("lapi.luau")
 --local typeh = require("ltypeh")
 
-export type OpCodeDecoder = (op: number) -> (number)
-export type VMInterrupt = (L: lstate.lua_State) -> ()
-
 local LOP = {
     NOP = 0,
     BREAK = 1,
@@ -229,18 +226,13 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 
 			elseif T == 5 then -- table
 				local tsize = read:number()
-				local keys = {}
 
+				-- skip keys
 				for i = 1, tsize do
-					local keyStringId = read:number()
-					table.insert(keys, strings[keyStringId])
+					read:number()
 				end
 
-				table.insert(p.k, {
-					size = tsize,
-					keys = keys,
-					data = table.create(tsize)
-				})
+				table.insert(p.k, table.create(tsize))
 			
 			elseif T == 6 then -- closure
 				p.k[i] = read:number()
@@ -374,7 +366,7 @@ local function LUAU_INSN_C(insn) return bit32.band(bit32.rshift(insn, 24), 0xFF)
 local function LUAU_INSN_D(insn) return bit32.rshift(insn, 16) end
 local function LUAU_INSN_E(insn) return bit32.rshift(insn, 8) end
 
-function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder?, VM_INTERRUPT: VMInterrupt)
+function luau_execute(L: lstate.lua_State)
 	local pc = L.ci.savedpc
 	local ip = 0 -- no pointers so we have to use a number pointing to the current instruction
 
@@ -382,12 +374,15 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder?, VM_INTERRUP
 	local base = L.base
 	local k = (cl.l :: lstate.LClosure).p.k
 
+	-- localize callbacks
+	local callbacks = L.global.cb
+	local VM_INTERRUPT = callbacks.interrupt
+	local decodeOp = callbacks.decodeOp
+	local debugbreak = callbacks.debugbreak
+
 	local function VM_REG(idx) return base + idx end
-
 	local function VM_KV(idx: number) return k[idx + 1] end
-
 	local function VM_UV(idx: number) return (cl.l :: lstate.LClosure).uprefs[idx] end
-
 	local function VM_PATCH_E(offset, slot)
 		--((uint32_t(slot) << 8) | (0x000000ffu & *(pc)))
 		pc[ip + (offset or 0)] = bit32.bor(bit32.lshift(slot, 8), bit32.band(0x000000ff, pc[ip]))
@@ -486,59 +481,134 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder?, VM_INTERRUP
 			end
 
 		-- table
-		-- BROKEN
 		elseif op == LOP.NEWTABLE then
-			error("someone pls help me make table im going crazy ts pmo icl sybau")
-			--local ra = VM_REG(LUAU_INSN_A(insn))
-			----local b = LUAU_INSN_B(insn)
-			--ip += 1
-			--local aux = pc[ip]
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			--local b = LUAU_INSN_B(insn)
+			ip += 1
+			local aux = pc[ip]
 
-			--L.ci.savedpc = pc
-			--lapi._setsvalue(L, ra, table.create(aux))
-			--return VM_NEXT()
+			L.ci.savedpc = pc
+			lapi._setsvalue(L, ra, table.create(aux))
+			return VM_NEXT()
 		elseif op == LOP.DUPTABLE then
-			error("someone pls help me make table im going crazy ts pmo icl sybau")
-			--local ra = VM_REG(LUAU_INSN_A(insn))
-			--local kv = VM_KV(LUAU_INSN_D(insn))
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			local kv = VM_KV(LUAU_INSN_D(insn))
 
-			--L.ci.savedpc = pc
-			--lapi._setsvalue(L, ra, table.clone(kv))
-			--return VM_NEXT()
+			L.ci.savedpc = pc
+			lapi._setsvalue(L, ra, kv)
+			return VM_NEXT()
 		elseif op == LOP.GETTABLEKS then
-			error("someone pls help me make table im going crazy ts pmo icl sybau")
-			--local ra = VM_REG(LUAU_INSN_A(insn))
-			--local rb = VM_REG(LUAU_INSN_B(insn))
-			--ip += 1
-			--local aux = pc[ip]
-			--local kv = VM_KV(aux)
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			local rb = VM_REG(LUAU_INSN_B(insn) + 1)
+			ip += 1
+			local aux = pc[ip]
+			local kv = VM_KV(aux)
+			
+			local srb = L.stack[rb]
+			if type(srb) == "table" then
+				lapi._setsvalue(L, ra, srb[kv])
 
-			--local srb = L.stack[rb + 1]
-			--if type(srb) == "table" then
-			--	--lapi._setsvalue(L, ra, (srb :: any).data[kv])
-			--	L.stack[ra + 1] = (srb :: any).data[kv]
-			--	print(L.stack)
-			--end
+				-- pop the table
+				L.top -= 1
+			else
+				error("__index is not supported (yet)")
+			end
 
-			--return VM_NEXT()
+			return VM_NEXT()
 		elseif op == LOP.SETTABLEKS then
-			error("someone pls help me make table im going crazy ts pmo icl sybau")
-			--local ra = VM_REG(LUAU_INSN_A(insn))
-			--local rb = VM_REG(LUAU_INSN_B(insn))
-			--ip += 1
-			--local aux = pc[ip]
-			--local kv = VM_KV(aux)
+			local ra = VM_REG(LUAU_INSN_A(insn) + 1)
+			local rb = VM_REG(LUAU_INSN_B(insn) + 1)
+			ip += 1
+			local aux = pc[ip]
+			local kv = VM_KV(aux)
 
-			---- idk how ts works someone help
-			--local srb = L.stack[rb + 1]
-			--if type(srb) == "table" then
-			--	(srb :: any).data[kv] = L.stack[ra + 1]
-			--	k[aux + 2] = srb
-			--	L.stack[ra + 1] = nil
-			--end
+			local t = L.stack[rb]
+			if typeof(t) == "table" then
+				t[kv] = L.stack[ra]
 
-			--return VM_NEXT()
+				-- pop value
+				L.stack[ra] = nil
+				L.top -= 1
+			else
+				error("__index is not supported (yet)")
+			end
+
+			return VM_NEXT()
+		elseif op == LOP.SETTABLE then
+			local ra = VM_REG(LUAU_INSN_A(insn) + 1)
+			local rb = VM_REG(LUAU_INSN_B(insn) + 1)
+			local rc = VM_REG(LUAU_INSN_C(insn) + 1)
+			
+			local t = L.stack[rb]
+			if typeof(t) == "table" then
+				t[L.stack[rc] :: any] = L.stack[ra]
+
+				-- pop value and table
+				L.stack[ra] = nil
+				L.top -= 1
+			else
+				error("__index is not supported (yet)")
+			end
+
+			return VM_NEXT()
+		elseif op == LOP.GETTABLE then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			local rb = VM_REG(LUAU_INSN_B(insn) + 1)
+			local rc = VM_REG(LUAU_INSN_C(insn) + 1)
+			
+			local t = L.stack[rb]
+			if typeof(t) == "table" then
+				lapi._setsvalue(L, ra, t[L.stack[rc] :: any])
+			else
+				error("__index is not supported (yet)")
+			end
+			lapi._setsvalue(L, ra, (L.stack[rb] :: any)[L.stack[rc]])
+			L.top -= 1
+
+			return VM_NEXT()
+		elseif op == LOP.SETLIST then
+			local ra = VM_REG(LUAU_INSN_A(insn) + 1)
+			local rb = VM_REG(LUAU_INSN_B(insn))
+			local c = LUAU_INSN_C(insn) - 1
+			ip += 1
+			local index = pc[ip]
+
+			if c == LUA.MULTRET then
+				c = L.top - rb
+				L.top = L.ci.top
+			end
+
+			local t = L.stack[ra]
+
+			if typeof(t) ~= "table" then
+				return
+			end
+
+			for i = index, c do
+				t[i] = L.stack[rb + i]
+				L.stack[rb + i] = nil
+				L.top -= 1
+			end
+
+			L.top += 1
+			L.stack[ra] = t
+
+			return VM_NEXT()
+		elseif op == LOP.LENGTH then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			local rb = VM_REG(LUAU_INSN_B(insn) + 1)
+
+			local t = L.stack[rb]
+			if typeof(t) == "table" then
+				lapi._setsvalue(L, ra, #t)
+				L.top -= 1
+			else
+				error("__len is not supported (yet)")
+			end
+			
+			return VM_NEXT()
 		
+		-- misc
 		elseif op == LOP.PREPVARARGS then
 			local nparams = LUAU_INSN_A(insn)
 
@@ -565,7 +635,12 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder?, VM_INTERRUP
 			VM_PATCH_E(0, hits)
 
 			return VM_NEXT()
+		elseif op == LOP.BREAK then
+			L.ci.savedpc = pc
+			if debugbreak then debugbreak(L) end
+			return VM_NEXT()
 
+		-- call & return
 		elseif op == LOP.CALL then
 			if VM_INTERRUPT then VM_INTERRUPT(L) end
 			local ra = VM_REG(LUAU_INSN_A(insn) + 1)

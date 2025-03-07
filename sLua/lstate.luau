@@ -7,8 +7,16 @@ export type TValue = number | string | boolean | { any } | { [any]: any } | (...
 export type StkId = TValue
 
 export type lua_Continuation = (L: lua_State, status: number) -> number
-
 export type lua_CFunction = (L: lua_State) -> number
+
+export type OpCodeDecoder = (op: number) -> (number)
+export type VMCallback = (L: lua_State) -> ()
+
+export type VMCallbacks = {
+	decodeOp: OpCodeDecoder?,
+	interrupt: VMCallback?,
+	debugbreak: VMCallback?
+}
 
 export type CClosure = {
 	f: lua_CFunction,
@@ -39,7 +47,8 @@ export type global_State = {
 	userdata: any,
 	mainthread: lua_State,
 	pseudotemp: any,
-	registry: TValue
+	registry: TValue,
+	cb: VMCallbacks
 }
 
 export type CallInfo = {
@@ -153,7 +162,8 @@ function newstate(userdata: any): lua_State
 		userdata = userdata,
 		mainthread = L,
 		pseudotemp = {},
-		registry = {}
+		registry = {},
+		cb = {}
 	}
 	L.gt = {}
 
