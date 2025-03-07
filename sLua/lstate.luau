@@ -29,6 +29,7 @@ export type lua_Closure = {
 	preload: number,
 
 	env: { [string]: any },
+	safeenv: boolean, -- uhhhhhhh
 
 	c: CClosure?,
 	l: LClosure?

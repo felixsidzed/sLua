@@ -5,8 +5,8 @@ local function luaB_print(L: lstate.lua_State): number
 	local argc = lapi.gettop(L)
 
 	local result = ""
-	for i = 1, argc do
-		result ..= lapi.tostring(L, -i) .. " "
+	for i = -argc, -1 do
+		result ..= lapi.tostring(L, i) .. " "
 	end
 	print(result)
 

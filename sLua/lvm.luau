@@ -1,3 +1,6 @@
+--!strict
+--!optimize 2
+
 local lstate = require("lstate.luau")
 local reader = require("reader.luau")
 local LUA = require("lconf.luau")
@@ -5,6 +8,7 @@ local lapi = require("lapi.luau")
 --local typeh = require("ltypeh")
 
 export type OpCodeDecoder = (op: number) -> (number)
+export type VMInterrupt = (L: lstate.lua_State) -> ()
 
 local LOP = {
     NOP = 0,
@@ -16,16 +20,16 @@ local LOP = {
     MOVE = 6,
     GETGLOBAL = 7,
     SETGLOBAL = 8,
-    GETGLOBALUPVAL = 9,
-    SETGLOBALUPVAL = 10,
+    GETUPVAL = 9,
+    SETUPVAL = 10,
     CLOSEUPVALS = 11,
     GETIMPORT = 12,
-    GETGLOBALTABLE = 13,
-    SETGLOBALTABLE = 14,
-    GETGLOBALTABLEKS = 15,
-    SETGLOBALTABLEKS = 16,
-    GETGLOBALTABLEN = 17,
-    SETGLOBALTABLEN = 18,
+    GETTABLE = 13,
+    SETTABLE = 14,
+    GETTABLEKS = 15,
+    SETTABLEKS = 16,
+    GETTABLEN = 17,
+    SETTABLEN = 18,
     NEWCLOSURE = 19,
     NAMECALL = 20,
     CALL = 21,
@@ -93,6 +97,22 @@ local LOP = {
     COUNT = 83
 }
 
+function luaV_getimport(L: lstate.lua_State, env, k, res, id: number, propagatenil: boolean)
+	local count = bit32.rshift(id, 30)
+
+	local id0 = bit32.band(bit32.rshift(id, 20), 0x3FF)
+	--local id1 = bit32.band(bit32.rshift(id, 10), 0x3FF)
+	--local id2 = bit32.band(bit32.rshift(id, 0), 0x3FF)
+
+	local g = env[k[id0 + 1]]
+
+	if count > 1 then
+		error("not (yet) supported import")
+	end
+
+	return g
+end
+
 function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: number, env: number): number
 	local read = reader.new(data:sub(1, size))
 
@@ -103,7 +123,7 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 		return 1
 	end
 
-	local envt = if env == 0 then L.gt else L.stack[L.top + env + 1]
+	local envt: { [string]: any } = if env == 0 then L.gt else L.stack[L.top + env + 1] :: { [string]: any }
 
 	local typesversion = 0
 	if lbc >= 4 then
@@ -208,18 +228,19 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 				p.k[i] = importTag
 
 			elseif T == 5 then -- table
-				local sizeTable = read:number()
-				local tableKeys = {}
+				local tsize = read:number()
+				local keys = {}
 
-				for i = 1, sizeTable do
-					local keyStringId = read:number() + 1
-					table.insert(tableKeys, keyStringId)
+				for i = 1, tsize do
+					local keyStringId = read:number()
+					table.insert(keys, strings[keyStringId])
 				end
 
-				p.k = {
-					size = sizeTable,
-					keys = tableKeys
-				}
+				table.insert(p.k, {
+					size = tsize,
+					keys = keys,
+					data = table.create(tsize)
+				})
 			
 			elseif T == 6 then -- closure
 				p.k[i] = read:number()
@@ -346,40 +367,26 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 	return 0
 end
 
-local function LUAU_INSN_OP(insn)
-	return bit32.band(insn, 0xFF)
-end
-local function LUAU_INSN_A(insn)
-	return bit32.band(bit32.rshift(insn, 8), 0xFF)
-end
-local function LUAU_INSN_B(insn)
-	return bit32.band(bit32.rshift(insn, 16), 0xFF)
-end
-local function LUAU_INSN_C(insn)
-	return bit32.band(bit32.rshift(insn, 24), 0xFF)
-end
-local function LUAU_INSN_D(insn)
-	return bit32.rshift(insn, 16)
-end
-local function LUAU_INSN_E(insn)
-return bit32.rshift(insn, 8)
-end
+local function LUAU_INSN_OP(insn) return bit32.band(insn, 0xFF) end
+local function LUAU_INSN_A(insn) return bit32.band(bit32.rshift(insn, 8), 0xFF) end
+local function LUAU_INSN_B(insn) return bit32.band(bit32.rshift(insn, 16), 0xFF) end
+local function LUAU_INSN_C(insn) return bit32.band(bit32.rshift(insn, 24), 0xFF) end
+local function LUAU_INSN_D(insn) return bit32.rshift(insn, 16) end
+local function LUAU_INSN_E(insn) return bit32.rshift(insn, 8) end
 
-function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
+function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder?, VM_INTERRUPT: VMInterrupt)
 	local pc = L.ci.savedpc
-	local ip = 0 -- no pointers so we have to use an instruction pointer (ip)
+	local ip = 0 -- no pointers so we have to use a number pointing to the current instruction
 
 	local cl = L.ci.func
 	local base = L.base
-	local k = cl.l.p.k
+	local k = (cl.l :: lstate.LClosure).p.k
 
-	local function VM_REG(idx)
-		return base + idx
-	end
+	local function VM_REG(idx) return base + idx end
 
-	local function VM_KV(idx)
-		return k[idx + 1]
-	end
+	local function VM_KV(idx: number) return k[idx + 1] end
+
+	local function VM_UV(idx: number) return (cl.l :: lstate.LClosure).uprefs[idx] end
 
 	local function VM_PATCH_E(offset, slot)
 		--((uint32_t(slot) << 8) | (0x000000ffu & *(pc)))
@@ -391,9 +398,146 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 	local function VM_DISPATCH(): ()
 		local insn = pc[ip]
 		local op = LUAU_INSN_OP(insn)
+		if decodeOp then
+			op = decodeOp(op)
+		end
 
 		if op == LOP.NOP then
 			return VM_NEXT()
+
+		-- load
+		elseif op == LOP.LOADNIL then
+			--lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), LUA.NILOBJ)
+			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), nil)
+			return VM_NEXT()
+		elseif op == LOP.LOADB then
+			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), LUAU_INSN_B(insn) ~= 0)
+			ip += LUAU_INSN_C(insn)
+			return VM_NEXT()
+		elseif op == LOP.LOADN then
+			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), LUAU_INSN_D(insn))
+			return VM_NEXT()
+		elseif op == LOP.LOADK then
+			lapi._setsvalue(L,
+				VM_REG(LUAU_INSN_A(insn)),
+				VM_KV(LUAU_INSN_D(insn))
+			)
+			return VM_NEXT()
+
+		elseif op == LOP.MOVE then
+			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), L.stack[VM_REG(LUAU_INSN_B(insn))])
+			return VM_NEXT()
+
+		-- globals
+		elseif op == LOP.GETGLOBAL then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			ip += 1
+			local aux = pc[ip]
+			local kv = VM_KV(aux)
+
+			-- uhhh too lazy to do wtv luau does
+			-- maybe ill implement this properly one day
+			lapi._setsvalue(L, ra, L.gt[kv])
+
+			return VM_NEXT()
+		elseif op == LOP.SETGLOBAL then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			ip += 1
+			local aux = pc[ip]
+			local kv = VM_KV(aux)
+
+			-- uhhh too lazy to do wtv luau does
+			-- maybe ill implement this properly one day
+			L.gt[kv] = L.stack[ra]
+
+			return VM_NEXT()
+		
+		-- upvalues
+		elseif op == LOP.GETUPVAL then
+			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), VM_UV(LUAU_INSN_B(insn)))
+			return VM_NEXT()
+		elseif op == LOP.SETUPVAL then
+			(cl.l :: lstate.LClosure).uprefs[LUAU_INSN_B(insn)] = L.stack[VM_REG(LUAU_INSN_A(insn))]
+			return VM_NEXT()
+		elseif op == LOP.CLOSEUPVALS then
+			--local ra = VM_REG(LUAU_INSN_A(insn))
+			--if L.openupval >= ra:
+			--	luaF_close(L, ra)
+			return VM_NEXT()
+		
+		-- import
+		elseif op == LOP.GETIMPORT then
+			local ra = VM_REG(LUAU_INSN_A(insn))
+			local kv = VM_KV(LUAU_INSN_D(insn))
+
+			if cl.safeenv then
+				lapi._setsvalue(L, ra, kv)
+
+				ip += 1 -- aux
+				return VM_NEXT()
+			else
+				ip += 1
+				local aux = pc[ip]
+
+				local import = luaV_getimport(L, cl.env, k, ra, aux, false)
+				lapi._setsvalue(L, ra, import)
+
+				return VM_NEXT()
+			end
+
+		-- table
+		-- BROKEN
+		elseif op == LOP.NEWTABLE then
+			error("someone pls help me make table im going crazy ts pmo icl sybau")
+			--local ra = VM_REG(LUAU_INSN_A(insn))
+			----local b = LUAU_INSN_B(insn)
+			--ip += 1
+			--local aux = pc[ip]
+
+			--L.ci.savedpc = pc
+			--lapi._setsvalue(L, ra, table.create(aux))
+			--return VM_NEXT()
+		elseif op == LOP.DUPTABLE then
+			error("someone pls help me make table im going crazy ts pmo icl sybau")
+			--local ra = VM_REG(LUAU_INSN_A(insn))
+			--local kv = VM_KV(LUAU_INSN_D(insn))
+
+			--L.ci.savedpc = pc
+			--lapi._setsvalue(L, ra, table.clone(kv))
+			--return VM_NEXT()
+		elseif op == LOP.GETTABLEKS then
+			error("someone pls help me make table im going crazy ts pmo icl sybau")
+			--local ra = VM_REG(LUAU_INSN_A(insn))
+			--local rb = VM_REG(LUAU_INSN_B(insn))
+			--ip += 1
+			--local aux = pc[ip]
+			--local kv = VM_KV(aux)
+
+			--local srb = L.stack[rb + 1]
+			--if type(srb) == "table" then
+			--	--lapi._setsvalue(L, ra, (srb :: any).data[kv])
+			--	L.stack[ra + 1] = (srb :: any).data[kv]
+			--	print(L.stack)
+			--end
+
+			--return VM_NEXT()
+		elseif op == LOP.SETTABLEKS then
+			error("someone pls help me make table im going crazy ts pmo icl sybau")
+			--local ra = VM_REG(LUAU_INSN_A(insn))
+			--local rb = VM_REG(LUAU_INSN_B(insn))
+			--ip += 1
+			--local aux = pc[ip]
+			--local kv = VM_KV(aux)
+
+			---- idk how ts works someone help
+			--local srb = L.stack[rb + 1]
+			--if type(srb) == "table" then
+			--	(srb :: any).data[kv] = L.stack[ra + 1]
+			--	k[aux + 2] = srb
+			--	L.stack[ra + 1] = nil
+			--end
+
+			--return VM_NEXT()
 		
 		elseif op == LOP.PREPVARARGS then
 			local nparams = LUAU_INSN_A(insn)
@@ -414,26 +558,6 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 
 			return VM_NEXT()
 
-		elseif op == LOP.GETGLOBAL then
-			local ra = VM_REG(LUAU_INSN_A(insn))
-			ip += 1
-			local aux = pc[ip]
-			local kv = VM_KV(aux)
-
-			-- uhhh too lazy to do wtv luau does
-			-- maybe ill implement this properly one day
-			lapi._setsvalue(L, ra, L.gt[kv])
-
-			return VM_NEXT()
-
-		elseif op == LOP.LOADK then
-			local ra = VM_REG(LUAU_INSN_A(insn))
-			local kv = VM_KV(LUAU_INSN_D(insn))
-
-			lapi._setsvalue(L, ra, kv)
-
-			return VM_NEXT()
-
 		elseif op == LOP.COVERAGE then
 			local hits = LUAU_INSN_E(insn)
 
@@ -443,7 +567,7 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 			return VM_NEXT()
 
 		elseif op == LOP.CALL then
-			-- VM_INTERRUPT()
+			if VM_INTERRUPT then VM_INTERRUPT(L) end
 			local ra = VM_REG(LUAU_INSN_A(insn) + 1)
 
 			local nparams = LUAU_INSN_B(insn) - 1
@@ -460,12 +584,12 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 			--	argtop += 1 -- __call adds an extra self
 			--end
 
-			local ccl = L.stack[ra]
+			local ccl: lstate.lua_Closure = L.stack[ra] :: lstate.lua_Closure
 			L.ci.savedpc = pc
 
 			L.cip = L.ci
 			L.ci = {
-				func = L.stack[ra],
+				func = L.stack[ra] :: any,
 				base = L.top - nparams,
 				top = L.top + ccl.stacksize,
 				savedpc = {},
@@ -476,7 +600,7 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 			L.top = argtop
 
 			if ccl.isC then
-				local func = ccl.c.f
+				local func = (ccl.c :: lstate.CClosure).f
 				local n = func(L)
 
 				-- yield
@@ -510,7 +634,7 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 
 				return VM_NEXT()
 			else
-				local p = ccl.l.p
+				local p = (ccl.l :: lstate.LClosure).p
 
 				local argi = L.top
 				local argend = L.base + p.numparams
@@ -529,14 +653,14 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 			end
 
 		elseif op == LOP.RETURN then
-			-- VM_INTERRUPT()
+			if VM_INTERRUPT then VM_INTERRUPT(L) end
 			local ra = VM_REG(LUAU_INSN_A(insn))--&base[LUAU_INSN_A(insn)]
 			local b = LUAU_INSN_B(insn) - 1
 
 			local ci = L.ci
 			local cip = L.cip
 
-			local res = ci.func
+			local res = ra
 
 			local vali = ra
 			local valend = if b == LUA.MULTRET then L.top else ra + b
@@ -565,7 +689,7 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 			end
 
 			local nextcl = cip.func
-			local nextproto = nextcl.l.p
+			local nextproto = (nextcl.l :: lstate.LClosure).p
 
 			pc = cip.savedpc
 			cl = nextcl
@@ -573,7 +697,7 @@ function luau_execute(L: lstate.lua_State, decodeOp: OpCodeDecoder)
 			k = nextproto.k
 
 			return VM_NEXT()
-
+		
 		else
 			for k, v in LOP do
 				if v == op then 

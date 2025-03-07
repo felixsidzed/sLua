@@ -108,7 +108,7 @@ function pushvalue(L: lstate.lua_State, idx: number)
 end
 
 function pushnil(L: lstate.lua_State)
-	--setsvalue(L, L.top, NILOBJ)
+	--setsvalue(L, L.top, LUA.NILOBJ)
 	setsvalue(L, L.top, nil)
 	L.top += 1
 end
@@ -192,7 +192,7 @@ function pushcclosurek(L: lstate.lua_State, func: lstate.lua_CFunction, debugnam
 	(cl.c :: lstate.CClosure).f = func;
 	(cl.c :: lstate.CClosure).cont = cont;
 	(cl.c :: lstate.CClosure).debugname = debugname;
-	(cl.c :: lstate.CClosure).upvals = {};
+	(cl.c :: lstate.CClosure).upvals = {}
 
 	while nup ~= 0 do
 		(cl.c :: lstate.CClosure).upvals[nup] = getsvalue(L, L.top + nup)
@@ -208,6 +208,7 @@ function newcclosure(L: lstate.lua_State, nup: number, env: { [string]: any }): 
 	local cl: lstate.lua_Closure = {} :: any
 	cl.isC = true
 	cl.env = env
+	cl.safeenv = false
 	cl.nupvalues = nup
 	cl.stacksize = LUA.MINSTACK
 	cl.preload = 0
