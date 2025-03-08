@@ -420,7 +420,7 @@ function luau_execute(L: lstate.lua_State)
 			return VM_NEXT()
 
 		elseif op == LOP.MOVE then
-			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn)), L.stack[VM_REG(LUAU_INSN_B(insn))])
+			lapi._setsvalue(L, VM_REG(LUAU_INSN_A(insn) + 1), L.stack[VM_REG(LUAU_INSN_B(insn) + 1)])
 			return VM_NEXT()
 
 		-- globals
@@ -675,35 +675,26 @@ function luau_execute(L: lstate.lua_State)
 			L.top = argtop
 
 			if ccl.isC then
-				local func = (ccl.c :: lstate.CClosure).f
-				local n = func(L)
-
-				-- yield
+				local c: lstate.CClosure = ccl.c :: lstate.CClosure
+				local n = c.f(L)
 				if n < 0 then
-					return -- goto exit
+					return LUA.PCRYIELD
 				end
 
-				local res = ra --ci.func
-				local vali = L.top - n
-				local valend = L.top
-
-				local i = nresults
-				while i ~= 0 and vali < valend do
-					res += 1
-					vali += 1
-					lapi._setsvalue(L, res, L.stack[vali])
-					
-					i -= 1
-				end
-				while i > 0 do
-					lapi._setsvalue(L, res, nil)
-					res += 1
-					i -= 1
+				local res = ra
+				if n > 0 then
+					for i = 1, n do
+						L.stack[res + i - 1] = L.stack[L.top - n + i + 1]
+					end
 				end
 
+				local extra = #L.stack - L.top
+				if extra > 0 then lapi.pop(L, extra - 1) end
+
+				L.top = res
 				L.ci = L.cip
 				L.base = L.cip.base
-				L.top = if nresults == LUA.MULTRET then res else L.cip.top
+				print(L.stack, L.top)
 
 				base = L.base
 

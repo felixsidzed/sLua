@@ -48,9 +48,7 @@ end
 
 local function index2addr(L: lstate.lua_State, idx: number): lstate.StkId
 	if idx > 0 then
-		local o: lstate.TValue = getsvalue(L, L.base + idx)
-		
-		return o
+		return getsvalue(L, L.base + idx)
 	elseif idx > LUA.REGISTRYINDEX then
 		return getsvalue(L, L.top + idx + 1)
 	else
@@ -255,28 +253,19 @@ function luau_precall(L: lstate.lua_State, nargs: number, nresults: number)
 			return LUA.PCRYIELD
 		end
 
-		-- copy return values into parent stack (but only up to nresults!), fill the rest with nil
-        -- TODO: it might be worthwhile to handle the case when nresults==b explicitly?
-		local vali = L.top - n
-		local valend = L.top
-
-		local i = nresults
-		while i ~= 0 and vali < valend do
-			pFunc += 1
-			vali += 1
-			setsvalue(L, pFunc, L.stack[vali])
-			
-			i -= 1
-		end
-		while i > 0 do
-			setsvalue(L, pFunc, nil)
-			pFunc += 1
-			i -= 1
+		local res = pFunc
+		if n > 0 then
+			for i = 1, n do
+				L.stack[res + i - 1] = L.stack[L.top - n + i + 1]
+			end
 		end
 
+		local extra = #L.stack - L.top
+		if extra > 0 then pop(L, extra - 1) end
+
+		L.top = res
 		L.ci = L.cip
 		L.base = L.cip.base
-		L.top = pFunc + 1
 
 		return LUA.PCRC
 	else
