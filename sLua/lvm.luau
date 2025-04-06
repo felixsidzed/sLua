@@ -1,7 +1,6 @@
 --!strict
 --!optimize 2
 
-local lapi = require("lapi") :: any
 local lstate = require("lstate")
 local reader = require("reader")
 local lgc = require("lgc")
@@ -29,7 +28,23 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 	local lbc = read:byte()
 
 	if lbc < LBC_VERSION_MIN or lbc > LBC_VERSION_MAX then
-		lapi.pushfstring(L, "[string '%s']: bytecode version mismatch (expected [%d..%d], got %d)", chunkname, LBC_VERSION_MIN, LBC_VERSION_MAX, lbc)
+		-- manual pushstring cuz lapi depends on lvm (recursive require)
+		L.stack[L.top] = {
+			tt = 5, memcat = L.activememcat, marked = 0,
+			extra = {},
+			value = {
+				gc = {
+					gch = { tt = 5, memcat = L.activememcat, marked = 0 },
+					ts = luaS[1](L, string.format(
+						"[string '%s']: bytecode version mismatch (expected [%d..%d], got %d)",
+						chunkname,
+						LBC_VERSION_MIN, LBC_VERSION_MAX,
+						lbc
+					))
+				}
+			}
+		}
+		L.top += 1
 		return 1
 	end
 
@@ -282,18 +297,24 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 
 	local cl: lstate.Closure = luaF[1](L, 0, envt, main)
 	L.stack[L.top] = {
+		tt = 7, marked = 0, extra = {},
 		value = {
-			cl = cl
+			gc = {
+				gch = { tt = 7, marked = 0, memcat = L.activememcat },
+				cl = cl
+			}
 		},
-		extra = {},
-		marked = 0,
-		tt = 7
 	}
 	L.top += 1
 	
 	return 0
 end
 
+function luau_execute(L: lstate.lua_State)
+	error("!TODO")
+end
+
 return {
-	luau_load
+	luau_load :: any,
+	luau_execute
 }

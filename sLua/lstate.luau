@@ -138,10 +138,10 @@ export type lua_Page = {
 
 export type CallInfo = {
 	base: number,
-	func: number,
+	func: Closure,
+	pfunc: number,
 	top: number,
-	savedpc: { number },
-	savedpcp: number, -- those who pointer ☠️☠️☠️
+	savedpc: number,
 
 	nresults: number,
 	flags: number
@@ -419,10 +419,10 @@ local function stack_init(L1: lua_State, L: lua_State)
 	L1.top = 1
 	L1.stack_last = L1.stack
 
-	L1.ci[L.cip].func = L1.top
-	L1.base = L1.ci[L.cip].base
+	L1.ci[L.cip].func = nil :: any
 	L1.ci[L.cip].base = L1.top
 	L1.ci[L.cip].top = L1.top + 20
+	L1.base = L1.ci[L.cip].base
 end
 
 local function f_luaopen(L: lua_State, userdata: any)
