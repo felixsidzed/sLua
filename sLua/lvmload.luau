@@ -310,11 +310,6 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 	return 0
 end
 
-function luau_execute(L: lstate.lua_State)
-	error("!TODO")
-end
-
 return {
-	luau_load :: any,
-	luau_execute
+	luau_load
 }

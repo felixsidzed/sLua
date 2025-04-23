@@ -1,7 +1,7 @@
 --!strict
 --!optimize 2
 
-local lvm = require("lvm")
+local lvm = require("lvmexecute")
 local lgc = require("lgc")
 local ldebug = require("ldebug")
 local lstate = require("lstate")
@@ -114,7 +114,7 @@ function lua_call(L: lstate.lua_State, nargs: number, nresults: number)
 		L.isactive = true
 		--luaC_threadbarrier(L)
 
-		lvm[2](L) -- call it
+		lvm[1](L) -- call it
 
 		L.isactive = oldactive
 	end

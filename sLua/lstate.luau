@@ -443,6 +443,16 @@ local function f_luaopen(L: lua_State, userdata: any)
 	g.GCthreshold = 4 * g.totalbytes
 end
 
+local function deepClone(t: { [any]: any }): { [any]: any }
+	local result = table.clone(t)
+	for k, v in result do
+		if type(v) == "table" then
+			result[k] = deepClone(v)
+		end
+	end
+	return result
+end
+
 function lua_newstate(userdata: any): lua_State
 	local L = {}
 	local g = ({} :: any) :: global_State
@@ -491,8 +501,8 @@ function lua_newstate(userdata: any): lua_State
 		size = 0,
 		nuse = 0
 	}
-	g.pseudotemp = luaO_nilobject
-	L.global.registry = luaO_nilobject
+	g.pseudotemp = deepClone(luaO_nilobject)
+	L.global.registry = deepClone(luaO_nilobject)
 	g.gcstate = 0 -- GCSpause
 	g.gray = {}
 	g.grayagain = {}
