@@ -14,11 +14,11 @@ sLua.use("vmexecute")
 local L = sLua.luaL_newstate()
 
 local src: string = [[
-(5)()
+a = 5
 ]]
 local bbc: string = sLua.luau_compile(src, { 0, 1, 2 })
 if bbc:sub(1, 1) ~= "\0" then
-	if sLua.luau_load(L, "=", bbc, #bbc) == 0 then
+	if sLua.luau_load(L, "=", bbc, #bbc, 0) == 0 then
 		sLua.lua_call(L, 0, 0)
 	end
 else

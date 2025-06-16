@@ -6,6 +6,11 @@ local lstate = require("lstate")
 type lua_State = lstate.lua_State
 type Closure = lstate.Closure
 type TValue = lstate.TValue
+type LuaTable = lstate.LuaTable
+type LuaNode = lstate.LuaNode
+type GCObject = lstate.GCObject
+type TString = lstate.TString
+type UpVal = lstate.UpVal
 
 local luaO_nilobject = lstate.luaO_nilobject
 
@@ -34,6 +39,7 @@ function luau_execute(L: lua_State)
 	local k: TValue -- TValue*
 	local pc: number
 	local code: { number }
+	local sizecode: number
 
 	assert(not L.ci[L.cip].func.isC)
 	assert(L.isactive)
@@ -46,16 +52,28 @@ function luau_execute(L: lua_State)
     base = L.base
     k = (cl.l :: any).p.k
 	code = (cl.l :: any).p.code
+	sizecode = (cl.l :: any).p.sizecode
 
 	local function VM_REG(reg: number): number
 		return base + reg
 	end
 
-	local function VM_KV(kv: number): TValue
-		return k[kv + 1]
+	local function VM_KV(i: number): TValue
+		return k[i + 1]
+	end
+
+	local function VM_UV(i: number): TValue
+		return (cl.l :: any).uprefs[i]
+	end
+
+	local function VM_PATCH_C(pc: number, slot: number)
+		code[pc] = (bit32.bor(bit32.lshift(slot, 24), bit32.band(0x00ffffff, code[pc])))
 	end
 
 	local function VM_NEXT()
+		if pc > sizecode then
+			return
+		end
 		local insn = code[pc]
 		local dispatchOp: number = LUAU_INSN_OP(insn)
 		
@@ -100,6 +118,85 @@ function luau_execute(L: lua_State)
 			local kv: TValue = VM_KV(LUAU_INSN_D(insn))
 			
 			L.stack[ra] = kv
+
+		elseif dispatchOp == 6 then
+			local ra: number = VM_REG(LUAU_INSN_A(insn))
+			local rb: number = VM_REG(LUAU_INSN_B(insn))
+
+			L.stack[ra] = L.stack[rb]
+
+		elseif dispatchOp == 7 then
+			local ra: number = VM_REG(LUAU_INSN_A(insn))
+			pc += 1
+			local aux: number = code[pc]
+			local kv: TValue = VM_KV(aux)
+			assert(kv.tt == 5)
+
+			-- fast-path: value is in expected slot
+			local h: LuaTable = cl.env
+			local slot: number = bit32.band(LUAU_INSN_C(insn), h.nodemask8)
+			local n: LuaNode = h.node[slot]
+
+			if n.key.tt == 5 and ((n.key.value.gc :: GCObject).ts :: TString) == ((kv.value.gc :: GCObject).ts :: TString) and n.val.tt ~= 0 then
+				L.stack[ra] = n.val
+			else
+				-- slow-path, may invoke Lua calls via __index metamethod
+				-- local g: TValue = {
+				-- 	tt = 6, marked = 0, memcat = 0,
+				-- 	value = {
+				-- 		gc = {
+				-- 			gch = {tt = 6, marked = 0, memcat = 0},
+				-- 			h = h
+				-- 		}
+				-- 	},
+				-- 	extra = {}
+				-- }
+				L.cachedslot = slot
+				-- TODO<luaV>
+				--luaV_gettable(L, g, kv, L.stack[ra]) -- VM_PROTECT
+				-- save cachedslot to accelerate future lookups; patches currently executing instruction since pc-2 rolls back two pc++
+				VM_PATCH_C(pc - 2, slot)
+			end
+
+		elseif dispatchOp == 8 then
+			local ra: number = VM_REG(LUAU_INSN_A(insn));
+			pc += 1
+			local aux: number = code[pc]
+			local kv: TValue = VM_KV(aux)
+			assert(kv.tt == 5)
+			
+			-- fast-path: value is in expected slot
+			local h: LuaTable = cl.env
+			local slot: number = bit32.band(LUAU_INSN_C(insn), h.nodemask8)
+			local n: LuaNode = h.node[slot]
+
+			if n.key.tt == 5 and ((n.key.value.gc :: GCObject).ts :: TString).data == ((kv.value.gc :: GCObject).ts :: TString).data and n.val.tt ~= 0 and not h.readonly then
+				n.val = L.stack[ra]
+				--luaC_barriert(L, h, ra) -- TODO
+			else
+				-- slow-path, may invoke Lua calls via __newindex metamethod
+				-- local g: TValue = {
+				-- 	tt = 6, marked = 0, memcat = 0,
+				-- 	value = {
+				-- 		gc = {
+				-- 			gch = {tt = 6, marked = 0, memcat = 0},
+				-- 			h = h
+				-- 		}
+				-- 	},
+				-- 	extra = {}
+				-- }
+				L.cachedslot = slot
+				-- TODO<luaV>
+				--luaV_settable(L, g, kv, L.stack[ra]) -- VM_PROTECT
+				-- save cachedslot to accelerate future lookups; patches currently executing instruction since pc-2 rolls back two pc++
+				VM_PATCH_C(pc - 2, slot)
+			end
+
+		elseif dispatchOp == 9 then
+			local ra: number = VM_REG(LUAU_INSN_A(insn))
+			local ur: TValue = VM_UV(LUAU_INSN_B(insn))
+			
+			L.stack[ra] = if ur.tt == 12 then ((ur.value.gc :: GCObject).uv :: UpVal).v :: any else ur
 
 		else
 			print(`unsupported opcode: {dispatchOp} (pc: {pc})`)
