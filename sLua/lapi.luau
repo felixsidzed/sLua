@@ -6,14 +6,22 @@ local lgc = require("lgc")
 local ldebug = require("ldebug")
 local lstate = require("lstate")
 
+type lua_State = lstate.lua_State
+type Closure = lstate.Closure
+type GCObject = lstate.GCObject
+type Proto = lstate.Proto
+type CallInfo = lstate.CallInfo
+
+local luaO_nilobject = lstate.luaO_nilobject
+
 type ptrdiff_t = { any }
 
-local function luau_precall(L: lstate.lua_State, func: number, nresults: number)
+local function luau_precall(L: lua_State, func: number, nresults: number)
 	if L.stack[func].tt ~= 7 then
 		error("__call not supported yet")
 	end
 
-	local ccl: lstate.Closure = (L.stack[func].value.gc :: lstate.GCObject).cl :: lstate.Closure
+	local ccl: Closure = (L.stack[func].value.gc :: GCObject).cl :: Closure
 
 	L.cip += 1
 	L.ci[L.cip] = {
@@ -33,13 +41,13 @@ local function luau_precall(L: lstate.lua_State, func: number, nresults: number)
 	--assert(ci.top <= L.stack_last)
 
 	if not ccl.isC then
-		local p: lstate.Proto = (ccl.l :: any).p
+		local p: Proto = (ccl.l :: any).p
 
 		-- fill unused parameters with nil
 		local argi: number = L.top
 		local argend: number = L.base + p.numparams
 		while argi < argend do
-			L.stack[argi] = lstate.luaO_nilobject
+			L.stack[argi] = luaO_nilobject
 			argi += 1
 		end
 		L.top = if p.is_vararg then argi else ci.top
@@ -48,7 +56,7 @@ local function luau_precall(L: lstate.lua_State, func: number, nresults: number)
 
 		return 0
 	else
-		local cfunc: (L: lstate.lua_State) -> number = (ccl.c :: any).f
+		local cfunc: (L: lua_State) -> number = (ccl.c :: any).f
 		local n: number = cfunc(L)
 
 		-- yield
@@ -57,8 +65,8 @@ local function luau_precall(L: lstate.lua_State, func: number, nresults: number)
 		end
 
 		-- ci is our callinfo, cip is our parent
-		--local ci: lstate.CallInfo = L.ci[L.cip]
-		local cip: lstate.CallInfo = L.ci[L.cip - 1]
+		--local ci: CallInfo = L.ci[L.cip]
+		local cip: CallInfo = L.ci[L.cip - 1]
 
 		-- copy return values into parent stack (but only up to nresults!), fill the rest with nil
 		-- TODO: it might be worthwhile to handle the case when nresults==b explicitly?
@@ -75,7 +83,7 @@ local function luau_precall(L: lstate.lua_State, func: number, nresults: number)
 		end
 		while i > 0 do
 			res += 1
-			L.stack[res] = lstate.luaO_nilobject
+			L.stack[res] = luaO_nilobject
 			i -= 1
 		end
 
@@ -88,7 +96,7 @@ local function luau_precall(L: lstate.lua_State, func: number, nresults: number)
 	end
 end
 
-function lua_call(L: lstate.lua_State, nargs: number, nresults: number)
+function lua_call(L: lua_State, nargs: number, nresults: number)
 	local func: number
 	assert(nargs + 1 <= L.top - L.base)
 	assert(L.status == 0)

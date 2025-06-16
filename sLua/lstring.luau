@@ -3,6 +3,9 @@
 
 local lstate = require("lstate")
 
+type lua_State = lstate.lua_State
+type TString = lstate.TString
+
 function luaS_hash(str)
 	local len = #str
 	local a, b = 0, 0
@@ -50,9 +53,9 @@ local function lmod(s: number, size: number): number
 	return bit32.band(s, size - 1)
 end
 
-function luaS_new(L: lstate.lua_State, data: string): lstate.TString
+function luaS_new(L: lua_State, data: string): TString
 	local h: number = luaS_hash(data)
-	local ts: lstate.TString = {
+	local ts: TString = {
 		atom = -32768,
 		hash = h,
 		len = string.len(data),

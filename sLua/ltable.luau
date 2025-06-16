@@ -3,14 +3,21 @@
 
 local lstate = require("lstate")
 
-local dummynode: lstate.LuaNode = {
+type lua_State = lstate.lua_State
+type LuaNode = lstate.LuaNode
+type TValue = lstate.TValue
+type LuaTable = lstate.LuaTable
+
+local luaO_nilobject = lstate.luaO_nilobject
+
+local dummynode: LuaNode = {
 	key = {
 		extra = {},
 		next = 0,
 		tt = 0,
-		value = lstate.luaO_nilobject
+		value = luaO_nilobject
 	},
-	val = lstate.luaO_nilobject
+	val = luaO_nilobject
 }
 
 local log_2 = {
@@ -38,15 +45,15 @@ local function luaO_log2(x: number): number
         l = l + 8
         x = math.floor(x / 256)
     end
-    return l + log_2[x + 1] -- Adjust for Lua's 1-based indexing
+    return l + log_2[x + 1]
 end
 
 local function ceillog2(x: number): number
     return luaO_log2(x - 1) + 1
 end
 
-function luaH_new(L: lstate.lua_State, narray: number, nhash: number): lstate.LuaTable
-	local t: lstate.LuaTable = {
+function luaH_new(L: lua_State, narray: number, nhash: number): LuaTable
+	local t: LuaTable = {
 		metatable = nil,
 		tmcache = 255,
 		array = {},
@@ -67,9 +74,9 @@ function luaH_new(L: lstate.lua_State, narray: number, nhash: number): lstate.Lu
 	}
 
 	if narray > 0 then
-		local array: { lstate.TValue } = t.array
+		local array: { TValue } = t.array
 		for i = t.sizearray, narray do
-			array[i] = lstate.luaO_nilobject
+			array[i] = luaO_nilobject
 		end
 		t.sizearray = narray
 	end
@@ -78,10 +85,10 @@ function luaH_new(L: lstate.lua_State, narray: number, nhash: number): lstate.Lu
 		nhash = bit32.rshift(1, nhash)
 		t.node = table.create(nhash)
 		for i = 0, nhash do
-			local n: lstate.LuaNode = table.clone(dummynode)
+			local n: LuaNode = table.clone(dummynode)
 			n.key.next = 0
-			n.key = lstate.luaO_nilobject
-			n.val = lstate.luaO_nilobject
+			n.key = luaO_nilobject
+			n.val = luaO_nilobject
 			t.node[i] = n
 		end
 		t.lsizenode = lsize

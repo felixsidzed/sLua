@@ -3,8 +3,15 @@
 
 local lstate = require("lstate")
 
-function luaF_newLclosure(L: lstate.lua_State, nelems: number, e: lstate.LuaTable, p: lstate.Proto): lstate.Closure
-	local c: lstate.Closure = {
+type lua_State = lstate.lua_State
+type LuaTable = lstate.LuaTable
+type Proto = lstate.Proto
+type Closure = lstate.Closure
+
+local luaO_nilobject = lstate.luaO_nilobject
+
+function luaF_newLclosure(L: lua_State, nelems: number, e: LuaTable, p: Proto): Closure
+	local c: Closure = {
 		marked = bit32.band(L.global.currentwhite, 7),
 		tt = 0,
 		memcat = L.activememcat,
@@ -22,7 +29,7 @@ function luaF_newLclosure(L: lstate.lua_State, nelems: number, e: lstate.LuaTabl
 	}
 	assert(c.l)
 	for i = 1, nelems do
-		c.l.uprefs[i] = lstate.luaO_nilobject
+		c.l.uprefs[i] = luaO_nilobject
 	end
 	return c
 end

@@ -5,21 +5,32 @@
 
 local lstate = require("lstate")
 
-function luaC_needsGC(L: lstate.lua_State): boolean
+type lua_State = lstate.lua_State
+type Udata = lstate.Udata
+type GCObject = lstate.GCObject
+type TValue = lstate.TValue
+type global_State = lstate.global_State
+type Closure = lstate.Closure
+type UpVal = lstate.UpVal
+type LuaTable = lstate.LuaTable
+type lua_Page = lstate.lua_Page
+type Proto = lstate.Proto
+
+function luaC_needsGC(L: lua_State): boolean
 	return L.global.totalbytes >= L.global.GCthreshold
 end
 
-local function reallymarkobject(g: lstate.global_State, o: lstate.GCObject)
+local function reallymarkobject(g: global_State, o: GCObject)
 	--white2gray(o)
 	o.gch.marked = bit32.band(o.gch.marked, bit32.bnot(3))
 	if o.gch.tt == 5 then
 		return
 
 	elseif o.gch.tt == 8 then
-		local mt = (o.u :: lstate.Udata).metatable
+		local mt = (o.u :: Udata).metatable
 		o.gch.marked = bit32.bor(o.gch.marked, bit32.lshift(1, 2))
 		if mt then
-			local mtgc: lstate.GCObject = {
+			local mtgc: GCObject = {
 				gch = {
 					tt = mt.tt,
 					marked = mt.marked,
@@ -33,7 +44,7 @@ local function reallymarkobject(g: lstate.global_State, o: lstate.GCObject)
 		end
 
 	elseif o.gch.tt == 12 then
-		local uv = o.uv :: lstate.UpVal
+		local uv = o.uv :: UpVal
 		if bit32.btest(o.gch.marked, 3) then
 			local uvgc = setmetatable({}, {
 				__index = function(t, k): any
@@ -46,22 +57,22 @@ local function reallymarkobject(g: lstate.global_State, o: lstate.GCObject)
 		end
 
 	elseif o.gch.tt == 7 then
-		(o.cl :: lstate.Closure).gclist = g.gray
+		(o.cl :: Closure).gclist = g.gray
 		g.gray = o
 	
 	elseif o.gch.tt == 6 then
-		(o.h :: lstate.LuaTable).gclist = g.gray
+		(o.h :: LuaTable).gclist = g.gray
 		g.gray = o
 
 	elseif o.gch.tt == 9 then
-		(o.th :: lstate.lua_State).gclist = g.gray
+		(o.th :: lua_State).gclist = g.gray
 		g.gray = o
 	
 	elseif o.gch.tt == 10 then
 		o.gch.marked = bit32.bor(o.gch.marked, bit32.lshift(1, 2))
 	
 	elseif o.gch.tt == 11 then
-		(o.p :: lstate.Proto).gclist = g.gray
+		(o.p :: Proto).gclist = g.gray
 		g.gray = o
 	
 	else
@@ -70,7 +81,7 @@ local function reallymarkobject(g: lstate.global_State, o: lstate.GCObject)
 	end
 end
 
-function sweepgcopage(L: lstate.lua_State, page: lstate.lua_Page): number
+function sweepgcopage(L: lua_State, page: lua_Page): number
 	local start: number = 0
 	local end_: number = 0
 	local busyBlocks: number = 0
@@ -87,7 +98,7 @@ function sweepgcopage(L: lstate.lua_State, page: lstate.lua_Page): number
 
 	assert(busyBlocks > 0)
 
-	local g: lstate.global_State = L.global
+	local g: global_State = L.global
 
 	local deadmask: number = bit32.bxor(g.currentwhite, 7--[[WHITEBITS]]) --otherwhite(g)
 	assert(bit32.btest(deadmask, 3--[[FIXEDBIT]]))
@@ -95,7 +106,7 @@ function sweepgcopage(L: lstate.lua_State, page: lstate.lua_Page): number
 	local newwhite: number = bit32.band(g.currentwhite, 7--[[bit2mask(WHITE0BIT, FIXEDBIT)]])--luaC_white(g)
 
 	for pos = start, end_, blockSize do
-		local gco: lstate.GCObject = page.data[pos]
+		local gco: GCObject = page.data[pos]
 
         if gco.gch.tt == 0--[[LUAT_NIL]] then
             continue
@@ -116,8 +127,8 @@ function sweepgcopage(L: lstate.lua_State, page: lstate.lua_Page): number
 	return (end_ - start) // blockSize
 end
 
-function atomic(L: lstate.lua_State)
-	local g: lstate.global_State = L.global
+function atomic(L: lua_State)
+	local g: global_State = L.global
 	assert(g.gcstate == 3)
 
 	local work: number = 0
@@ -133,7 +144,7 @@ function atomic(L: lstate.lua_State)
 			assert(uv.v ~= uv.u.value)
 			assert(uv.u.open.next.u.open.prev == uv and uv.u.open.prev.u.open.next == uv)
 			--obj2gco(uv)
-			local uv_: lstate.GCObject = {
+			local uv_: GCObject = {
 				gch = {
 					marked = uv.marked,
 					memcat = uv.memcat,
@@ -144,7 +155,7 @@ function atomic(L: lstate.lua_State)
 			assert(bit32.btest(uv_.gch.marked, 2--[[BLACKBIT]]))
 
 			if bit32.btest(uv_.gch.marked, 7--[[WHITEBITS | bitmask(BLACKBIT))]]) then
-				if (uv.v:: lstate.TValue).tt < 5 and bit32.btest(uv_.gch.marked, 7--[[WHITEBITS]]) then
+				if (uv.v:: TValue).tt < 5 and bit32.btest(uv_.gch.marked, 7--[[WHITEBITS]]) then
 					reallymarkobject(g, uv_)
 				end
 			end
@@ -178,7 +189,7 @@ function atomic(L: lstate.lua_State)
 			assert(uv.v ~= uv.u.value)
 			assert(uv.u.open.next.u.open.prev == uv and uv.u.open.prev.u.open.next == uv)
 			--obj2gco(uv)
-			local uv_: lstate.GCObject = {
+			local uv_: GCObject = {
 				gch = {
 					marked = uv.marked,
 					memcat = uv.memcat,
@@ -193,7 +204,7 @@ function atomic(L: lstate.lua_State)
 				uv.markedopen = false
 				uv = uv.u.open.next
 			else
-				local next_: lstate.UpVal = uv.u.open.next
+				local next_: UpVal = uv.u.open.next
 				uv = nil :: any
 				--luaF_closeupval(L, uv, /* dead= */ iswhite(obj2gco(uv)));
 				uv = next_
@@ -208,15 +219,15 @@ function atomic(L: lstate.lua_State)
 	return work
 end
 
-function gcstep(L: lstate.lua_State, limit: number): number
+function gcstep(L: lua_State, limit: number): number
 	local cost: number = 0
-	local g: lstate.global_State = L.global
+	local g: global_State = L.global
 
 	if g.gcstate == 0 then -- GCSpause
 		table.clear(g.gray)
 		table.clear(g.grayagain)
 		table.clear(g.weak)
-		local th: lstate.GCObject = {
+		local th: GCObject = {
 			gch = {
 				tt = g.mainthread.tt,
 				marked = g.mainthread.marked,
@@ -229,7 +240,7 @@ function gcstep(L: lstate.lua_State, limit: number): number
 		end
 
 		-- make global table be traversed before main stack
-		local h: lstate.GCObject = {
+		local h: GCObject = {
 			gch = {
 				tt = g.mainthread.gt.tt,
 				marked = g.mainthread.gt.marked,
@@ -241,14 +252,14 @@ function gcstep(L: lstate.lua_State, limit: number): number
 			reallymarkobject(g, h)
 		end
 		
-		if g.registry.tt < 5 and bit32.btest((g.registry.value.gc :: lstate.GCObject).gch.marked, 7) then
-			reallymarkobject(g, (g.registry.value.gc :: lstate.GCObject))
+		if g.registry.tt < 5 and bit32.btest((g.registry.value.gc :: GCObject).gch.marked, 7) then
+			reallymarkobject(g, (g.registry.value.gc :: GCObject))
 		end
 
 		for i = 0, 11 do -- LUA_T_COUNT
 			if g.mt[i] then
 				local mt = g.mt[i]
-				local mtgc: lstate.GCObject = {
+				local mtgc: GCObject = {
 					gch = {
 						tt = mt.tt,
 						marked = mt.marked,
@@ -291,7 +302,7 @@ function gcstep(L: lstate.lua_State, limit: number): number
 
 	elseif g.gcstate == 4 then -- GCSsweep
 		while g.sweepgcopage and cost < limit do
-			local next_: lstate.lua_Page = g.sweepgcopage.listnext
+			local next_: lua_Page = g.sweepgcopage.listnext
 
 			local steps: number = sweepgcopage(L, g.sweepgcopage)
 
@@ -301,7 +312,7 @@ function gcstep(L: lstate.lua_State, limit: number): number
 			if g.sweepgcopage == nil then
 				--obj2gco(g->mainthread)
 				local m = g.mainthread
-				local th: lstate.GCObject = {
+				local th: GCObject = {
 					gch = {
 						marked = m.marked,
 						memcat = m.memcat,
@@ -329,8 +340,8 @@ function gcstep(L: lstate.lua_State, limit: number): number
 	return cost
 end
 
-function luaC_step(L: lstate.lua_State): number
-	local g: lstate.global_State = L.global
+function luaC_step(L: lua_State): number
+	local g: global_State = L.global
 
 	local lim: number = g.gcstepsize * g.gcstepmul // 100 -- how much to work
 	assert(g.totalbytes >= g.GCthreshold)
@@ -369,7 +380,7 @@ end
 return {
 	luaC_needsGC :: any,
 	luaC_step,
-	luaC_checkGC = function(L: lstate.lua_State)
+	luaC_checkGC = function(L: lua_State)
 		if luaC_needsGC(L) then
 			luaC_step(L)
 		end

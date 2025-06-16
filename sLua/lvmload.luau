@@ -8,6 +8,16 @@ local luaS = require("lstring")
 local luaH = require("ltable")
 local luaF = require("lfunc")
 
+type lua_State = lstate.lua_State
+type LuaTable = lstate.LuaTable
+type Closure = lstate.Closure
+type TString = lstate.TString
+type Proto = lstate.Proto
+type TValue = lstate.TValue
+type GCObject = lstate.GCObject
+
+local luaO_nilobject = lstate.luaO_nilobject
+
 local LBC_VERSION_MIN = 3
 local LBC_VERSION_MAX = 6
 
@@ -20,7 +30,7 @@ local function ScopedSetGCThreshold(global, newThreshold)
     end
 end
 
-function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: number, env: number): number
+function luau_load(L: lua_State, chunkname: string, data: string, size: number, env: number): number
 	env = env or 0
 
 	local read = reader.new(data:sub(1, size))
@@ -55,9 +65,9 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 	local resumeGC = ScopedSetGCThreshold(L.global, math.huge)
 
 	-- env is 0 for current environment and a stack index otherwise
-	local envt: lstate.LuaTable = if (env == 0) then L.gt else (L.stack[L.base + (env - 1)].value.gc :: lstate.GCObject).h :: lstate.LuaTable
+	local envt: LuaTable = if (env == 0) then L.gt else (L.stack[L.base + (env - 1)].value.gc :: GCObject).h :: LuaTable
 
-	local source: lstate.TString = luaS[1](L, chunkname)
+	local source: TString = luaS[1](L, chunkname)
 
 	local typesversion: number = 0
 
@@ -67,7 +77,7 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 
 	-- string table
 	local stringCount: number = read:number()
-	local strings: { lstate.TString } = table.create(stringCount)
+	local strings: { TString } = table.create(stringCount)
 	for i=1,stringCount do
 		strings[i] = luaS[1](L, read:string())
 	end
@@ -84,7 +94,7 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 
 		local index: number = read:byte()
 		while index ~= 0 do
-			local name: lstate.TString = strings[index - 1]
+			local name: TString = strings[index - 1]
 
 			if index - 1 < userdataTypeLimit then
 				local cb = L.global.ecb.gettypemapping
@@ -99,10 +109,10 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 
 	-- proto table
 	local protoCount: number = read:number()
-	local protos: { lstate.Proto } = table.create(protoCount)
+	local protos: { Proto } = table.create(protoCount)
 
 	for i = 1, protoCount do
-		local p: lstate.Proto = {} :: any -- luaF_newproto(L)
+		local p: Proto = {} :: any -- luaF_newproto(L)
 		p.source = source
 		p.bytecodeid = i
 
@@ -149,7 +159,7 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 			local kt: number = read:byte()
 
 			if kt == 0 then
-				p.k[j] = lstate.luaO_nilobject
+				p.k[j] = luaO_nilobject
 
 			elseif kt == 1 then
 				p.k[j] = {
@@ -203,13 +213,13 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 			
 			elseif kt == 5 then
 				local keys: number = read:number()
-				local h: lstate.LuaTable = luaH[1](L, 0, keys)
+				local h: LuaTable = luaH[1](L, 0, keys)
 				for i = 0, keys do
 					local key: number = read:number()
-					local val: lstate.TValue = luaH[2](L, h, p.k[key])
+					local val: TValue = luaH[2](L, h, p.k[key])
 					val.value.n = 0.0
 				end
-				(p.k[j].value.gc :: lstate.GCObject).h = h
+				(p.k[j].value.gc :: GCObject).h = h
 
 			elseif kt == 6 then
 				-- TODO
@@ -291,11 +301,11 @@ function luau_load(L: lstate.lua_State, chunkname: string, data: string, size: n
 	end
 
 	local mainid: number = read:number()
-	local main: lstate.Proto = protos[mainid + 1]
+	local main: Proto = protos[mainid + 1]
 
 	resumeGC() -- i think so
 
-	local cl: lstate.Closure = luaF[1](L, 0, envt, main)
+	local cl: Closure = luaF[1](L, 0, envt, main)
 	L.stack[L.top] = {
 		tt = 7, marked = 0, extra = {},
 		value = {

@@ -4,14 +4,16 @@
 local lstring = require("lstring")
 local lstate = require("lstate")
 
-function pusherror()
-end
+type lua_State = lstate.lua_State
+type CallInfo = lstate.CallInfo
+type TString = lstate.TString
+type Proto = lstate.Proto
 
-function luaG_runerror(L: lstate.lua_State, fmt: string, ...)
-	local ci: lstate.CallInfo = L.ci[L.cip]
+function luaG_runerror(L: lua_State, fmt: string, ...)
+	local ci: CallInfo = L.ci[L.cip]
 	if L.ci and not ci.func.isC and ci.func.l then
-		local p: lstate.Proto = ci.func.l.p
-		local source: lstate.TString = p.source
+		local p: Proto = ci.func.l.p
+		local source: TString = p.source
 		local line: number = p.lineinfo[p.abslineinfo + bit32.rshift(ci.savedpc, p.linegaplog2)] + p.lineinfo[ci.savedpc]
 		-- manual pushstring cuz lapi depends on ldebug (recursive require)
 		L.stack[L.top] = {

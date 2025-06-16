@@ -3,6 +3,12 @@
 
 local lstate = require("lstate")
 
+type lua_State = lstate.lua_State
+type Closure = lstate.Closure
+type TValue = lstate.TValue
+
+local luaO_nilobject = lstate.luaO_nilobject
+
 local function LUAU_INSN_OP(insn: number): number
 	return bit32.band(insn, 0xFF)
 end
@@ -20,12 +26,12 @@ local function LUAU_INSN_D(insn: number): number
 	return bit32.rshift(insn, 16)
 end
 
-function luau_execute(L: lstate.lua_State)
+function luau_execute(L: lua_State)
 	-- the critical interpreter state, stored in locals for performance
 	-- the hope is that these map to registers without spilling (which is not true for x86 :/)
-	local cl: lstate.Closure
+	local cl: Closure
 	local base: number
-	local k: lstate.TValue -- TValue*
+	local k: TValue -- TValue*
 	local pc: number
 	local code: { number }
 
@@ -45,33 +51,23 @@ function luau_execute(L: lstate.lua_State)
 		return base + reg
 	end
 
-	local function VM_KV(kv: number): lstate.TValue
+	local function VM_KV(kv: number): TValue
 		return k[kv + 1]
 	end
 
-	local VM_NEXT; VM_NEXT = function()
-		local dispatchOp: number = LUAU_INSN_OP(code[pc])
-		print(dispatchOp)
+	local function VM_NEXT()
+		local insn = code[pc]
+		local dispatchOp: number = LUAU_INSN_OP(insn)
 		
 		if dispatchOp == 0 then
-			pc += 1
-			local insn = code[pc - 1]
 			assert(insn == 0)
-			VM_NEXT()
 
 		elseif dispatchOp == 2 then
-			pc += 1
-			local insn = code[pc - 1]
 			local ra: number = VM_REG(LUAU_INSN_A(insn))
-
-			L.stack[ra] = lstate.luaO_nilobject
-			VM_NEXT()
+			L.stack[ra] = luaO_nilobject
 
 		elseif dispatchOp == 3 then
-			pc += 1
-			local insn = code[pc - 1]
 			local ra: number = VM_REG(LUAU_INSN_A(insn))
-
 			L.stack[ra] = {
 				tt = 1,
 				marked = L.marked,
@@ -84,11 +80,9 @@ function luau_execute(L: lstate.lua_State)
 
 			pc += LUAU_INSN_C(insn)
 			--LUAU_ASSERT(unsigned(pc - cl->l.p->code) < unsigned(cl->l.p->sizecode))
-			VM_NEXT()
 
 		elseif dispatchOp == 4 then
 			pc += 1
-			local insn = code[pc - 1]
 			local ra: number = VM_REG(LUAU_INSN_A(insn))
 
 			L.stack[ra] = {
@@ -100,25 +94,19 @@ function luau_execute(L: lstate.lua_State)
 					n = LUAU_INSN_D(insn)
 				}
 			}
-			VM_NEXT()
 
 		elseif dispatchOp == 5 then
-			pc += 1
-			local insn = code[pc - 1]
 			local ra: number = VM_REG(LUAU_INSN_A(insn))
-			local kv: lstate.TValue = VM_KV(LUAU_INSN_D(insn))
+			local kv: TValue = VM_KV(LUAU_INSN_D(insn))
 			
 			L.stack[ra] = kv
-			VM_NEXT()
 
 		else
 			print(`unsupported opcode: {dispatchOp} (pc: {pc})`)
-
-			if pc < #code then
-				pc += 1
-				VM_NEXT()
-			end
 		end
+
+		pc += 1
+		VM_NEXT()
 	end
 
 	VM_NEXT()
