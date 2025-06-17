@@ -7,6 +7,8 @@ type lua_State = lstate.lua_State
 type LuaNode = lstate.LuaNode
 type TValue = lstate.TValue
 type LuaTable = lstate.LuaTable
+type TString = lstate.TString
+type GCObject = lstate.GCObject
 
 local luaO_nilobject = lstate.luaO_nilobject
 
@@ -99,7 +101,38 @@ function luaH_new(L: lua_State, narray: number, nhash: number): LuaTable
 	return t
 end
 
+-- search function for strings
+function luaH_getstr(t: LuaTable, key: TString): TValue
+	local pn = bit32.band(key.hash, t.lsizenode-1)
+    while true do -- check whether `key' is somewhere in the chain
+		local n: LuaNode = t.node[pn]
+        if n.key.tt == 5 and ((n.key.value.gc :: GCObject).ts :: TString).data == key.data then
+            return n.val -- that's it
+		end
+        if (n.key.next == 0) then
+            break
+		end
+        pn += n.key.next
+	end
+    return luaO_nilobject
+end
+
+function luaH_get(t: LuaTable, key: TValue): TValue?
+	if key.tt == 0 then
+		return luaO_nilobject
+	elseif key.tt == 5 then
+		return luaH_getstr(t, (key.value.gc :: GCObject).ts :: TString)
+	elseif key.tt == 3 then
+		-- else fall through
+	end
+
+	assert("NotImplementedYet")
+	return nil
+end
+
 return {
 	luaH_new :: any,
+	luaH_get,
+	luaH_getstr,
 	luaH_dummynode = dummynode
 }
