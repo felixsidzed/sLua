@@ -165,14 +165,14 @@ function atomic(L: lua_State)
 	end
 	-- traverse objects caught by write barrier and by 'remarkupvals'
 	while #g.gray ~= 0 do
-		--work += propagatemark(g) -- NIGGER NIGGER NIGGER
+		--work += propagatemark(g) -- TODO
 		table.clear(g.gray)
 	end
 
 	g.gray = g.weak
 	table.clear(g.grayagain)
 	while #g.gray ~= 0 do
-		--work += propagatemark(g) -- NIGGER NIGGER NIGGER
+		--work += propagatemark(g) -- TODO
 		table.clear(g.gray)
 	end
 
@@ -278,7 +278,7 @@ function gcstep(L: lua_State, limit: number): number
 
 	elseif g.gcstate == 1 then -- GCSpropagate
 		while #g.gray ~= 0 and cost < limit do
-			--cost += propagatemark(g) -- NIGGER NIGGER NIGGER
+			--cost += propagatemark(g) -- TODO
 		end
 
 		if #g.gray == 0 then
@@ -289,7 +289,7 @@ function gcstep(L: lua_State, limit: number): number
 
 	elseif g.gcstate == 2 then -- GCSpropagateagain
 		while #g.gray ~= 0 and cost < limit do
-			--cost += propagatemark(g) -- NIGGER NIGGER NIGGER
+			--cost += propagatemark(g) -- TODO
 		end
 
 		if #g.gray == 0 then -- no more `gray' objects

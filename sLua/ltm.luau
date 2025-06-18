@@ -21,6 +21,7 @@ function luaT_gettm(events: LuaTable, event: number, ename: TString): TValue?
 end
 
 function fasttm(L: lua_State, et: LuaTable, e: number): TValue?
+	if et == nil then return nil end
 	return if bit32.band(et.tmcache, bit32.lshift(1, e)) then nil else luaT_gettm(et, e, L.global.tmname[e])
 end
 

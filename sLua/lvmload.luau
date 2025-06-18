@@ -65,7 +65,7 @@ function luau_load(L: lua_State, chunkname: string, data: string, size: number, 
 	local resumeGC = ScopedSetGCThreshold(L.global, math.huge)
 
 	-- env is 0 for current environment and a stack index otherwise
-	local envt: LuaTable = if (env == 0) then L.gt else (L.stack[L.base + (env - 1)].value.gc :: GCObject).h :: LuaTable
+	local envt: LuaTable = if env == 0 then L.gt else (L.stack[L.base + (env - 1)].value.gc :: GCObject).h :: LuaTable
 
 	local source: TString = luaS[1](L, chunkname)
 

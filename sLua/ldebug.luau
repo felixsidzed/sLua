@@ -8,6 +8,7 @@ type lua_State = lstate.lua_State
 type CallInfo = lstate.CallInfo
 type TString = lstate.TString
 type Proto = lstate.Proto
+type TValue = lstate.TValue
 
 function luaG_runerror(L: lua_State, fmt: string, ...)
 	local ci: CallInfo = L.ci[L.cip]
@@ -44,6 +45,16 @@ function luaG_runerror(L: lua_State, fmt: string, ...)
 	error("LUA_ERRRUN")
 end
 
+function luaG_indexerror(L: lua_State, a: TValue, b: TValue): ()
+	luaG_runerror(L, "attempt to index %s with %s", L.global.ttname[a.tt], L.global.ttname[b.tt])
+end
+
+function luaG_readonlyerror(L: lua_State): ()
+	luaG_runerror(L, "attempt to modify a read-only table")
+end
+
 return {
-	luaG_runerror :: any
+	luaG_runerror :: any,
+	luaG_indexerror,
+	luaG_readonlyerror
 }

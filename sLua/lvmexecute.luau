@@ -2,6 +2,7 @@
 --!optimize 2
 
 local lstate = require("lstate")
+local luaV = require("lvmutils")
 
 type lua_State = lstate.lua_State
 type Closure = lstate.Closure
@@ -141,19 +142,18 @@ function luau_execute(L: lua_State)
 				L.stack[ra] = n.val
 			else
 				-- slow-path, may invoke Lua calls via __index metamethod
-				-- local g: TValue = {
-				-- 	tt = 6, marked = 0, memcat = 0,
-				-- 	value = {
-				-- 		gc = {
-				-- 			gch = {tt = 6, marked = 0, memcat = 0},
-				-- 			h = h
-				-- 		}
-				-- 	},
-				-- 	extra = {}
-				-- }
+				local g: TValue = {
+					tt = 6, marked = 0, memcat = 0,
+					value = {
+						gc = {
+							gch = {tt = 6, marked = 0, memcat = 0},
+							h = h
+						}
+					},
+					extra = {}
+				}
 				L.cachedslot = slot
-				-- TODO<luaV>
-				--luaV_gettable(L, g, kv, L.stack[ra]) -- VM_PROTECT
+				luaV[1](L, g, kv, ra) -- VM_PROTECT
 				-- save cachedslot to accelerate future lookups; patches currently executing instruction since pc-2 rolls back two pc++
 				VM_PATCH_C(pc - 2, slot)
 			end
@@ -175,19 +175,19 @@ function luau_execute(L: lua_State)
 				--luaC_barriert(L, h, ra) -- TODO
 			else
 				-- slow-path, may invoke Lua calls via __newindex metamethod
-				-- local g: TValue = {
-				-- 	tt = 6, marked = 0, memcat = 0,
-				-- 	value = {
-				-- 		gc = {
-				-- 			gch = {tt = 6, marked = 0, memcat = 0},
-				-- 			h = h
-				-- 		}
-				-- 	},
-				-- 	extra = {}
-				-- }
+				local g: TValue = {
+					tt = 6, marked = 0, memcat = 0,
+					value = {
+						gc = {
+							gch = {tt = 6, marked = 0, memcat = 0},
+							h = h
+						}
+					},
+					extra = {}
+				}
 				L.cachedslot = slot
 				-- TODO<luaV>
-				--luaV_settable(L, g, kv, L.stack[ra]) -- VM_PROTECT
+				luaV[2](L, g, kv, ra) -- VM_PROTECT
 				-- save cachedslot to accelerate future lookups; patches currently executing instruction since pc-2 rolls back two pc++
 				VM_PATCH_C(pc - 2, slot)
 			end

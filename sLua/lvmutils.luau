@@ -36,7 +36,7 @@ function luaV_gettable(L: lua_State, t: TValue, key: TValue, val: number): ()
 		else
 			tm = assert(false, "luaT_gettmbyobj(L, t, TM_INDEX)") :: any
 			if not tm or tm.tt == 0 then
-				ldebug[1](L, "attempt to index %s with %s", L.global.ttname[t.tt], L.global.ttname[key.tt])
+				ldebug[2](L, t, key)
 			end
 		end
 		if tm and tm.tt == 7 then
@@ -48,6 +48,51 @@ function luaV_gettable(L: lua_State, t: TValue, key: TValue, val: number): ()
 	ldebug[1](L, "'__index' chain too long; possible loop")
 end
 
+function luaV_settable(L: lua_State, t: TValue, key: TValue, val: number): ()
+	local temp: TValue
+	for loop=0,100 do -- MAXTAGLOOP
+        local tm: TValue
+        if t.tt == 6 then -- `t' is a table?
+            local h: LuaTable = (t.value.gc :: GCObject).h :: LuaTable
+
+            local oldval: TValue = luaH[2](h, key) -- do a primitive get
+
+            -- should we assign the key? (if key is valid or __newindex is not set)
+			tm = ltm[2](L, h.metatable, 1)
+			if oldval.tt ~= 0 or not tm then
+                if h.readonly then
+                    ldebug[3](L)
+				end
+
+                -- luaH_set would work but would repeat the lookup so we use luaH_setslot that can reuse oldval if it's safe
+                local newval: {TValue} = luaH[5](L, h, oldval, key)
+
+                -- L.cachedslot = gval2slot(h, newval); -- remember slot to accelerate future lookups -- TODO
+
+                newval[1] = L.stack[val]
+                return
+			end
+
+            -- fallthrough to metamethod
+        else
+			tm = assert(false, "luaT_gettmbyobj(L, t, TM_NEWINDEX)") :: any
+			if not tm or tm.tt == 0 then
+				ldebug[2](L, t, key)
+			end
+		end
+
+        if tm.tt == 7 then
+            assert(false, "callTM(L, tm, t, key, val)")
+            return
+		end
+        -- else repeat with `tm'
+		temp = tm
+		t = temp
+    end
+    ldebug[1](L, "'__newindex' chain too long; possible loop")
+end
+
 return {
-	luaV_gettable :: any
+	luaV_gettable :: any,
+	luaV_settable
 }
